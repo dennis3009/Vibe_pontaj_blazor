@@ -1,0 +1,690 @@
+@page "/timesheet"
+@attribute [Authorize]
+@inject ITimesheetRepository TimesheetRepository
+@inject IProjectRepository ProjectRepository
+@inject IProjectAllocationRepository ProjectAllocationRepository
+@inject IEmployeeRepository EmployeeRepository
+@inject IExcelExportService ExcelExportService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Timesheet - VibePontaj</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-3">
+        <div class="col-md-12">
+            <h2>
+                <span class="bi bi-clock-fill me-2"></span>
+                My Timesheet
+            </h2>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @errorMessage
+            <button type="button" class="btn-close" @onclick="@(() => errorMessage = null)"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            @successMessage
+            <button type="button" class="btn-close" @onclick="@(() => successMessage = null)"></button>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="text-center my-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading timesheet...</p>
+        </div>
+    }
+    else
+    {
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white">
+                <div class="row align-items-center">
+                    <div class="col-md-4">
+                        <button class="btn btn-light btn-sm" @onclick="PreviousWeek">
+                            <span class="bi bi-chevron-left"></span> Previous Week
+                        </button>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <h5 class="mb-0">
+                            Week @currentWeekNumber, @currentYear
+                            <br />
+                            <small>@GetWeekStartDate().ToString("MMM dd") - @GetWeekEndDate().ToString("MMM dd, yyyy")</small>
+                        </h5>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <button class="btn btn-light btn-sm" @onclick="NextWeek" disabled="@IsFutureWeek()">
+                            Next Week <span class="bi bi-chevron-right"></span>
+                        </button>
+                        <button class="btn btn-light btn-sm ms-2" @onclick="GoToCurrentWeek">
+                            <span class="bi bi-calendar-today"></span> This Week
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                @if (weekStatus != null && weekStatus != "Draft")
+                {
+                    <div class="alert @GetStatusAlertClass(weekStatus) mb-3">
+                        <span class="bi @GetStatusIcon(weekStatus) me-2"></span>
+                        <strong>Week Status:</strong> @weekStatus
+                        @if (weekStatus == "Submitted")
+                        {
+                            <span> - Pending approval from manager</span>
+                        }
+                        @if (isWeekLocked)
+                        {
+                            <span> - This week is locked and cannot be edited</span>
+                        }
+                    </div>
+                }
+
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 10%;">Date</th>
+                                <th style="width: 8%;">Day</th>
+                                <th style="width: 25%;">Project</th>
+                                <th style="width: 10%;">Hours</th>
+                                <th style="width: 35%;">Description</th>
+                                <th style="width: 12%;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var day in GetWeekDays())
+                            {
+                                var dayTimesheets = timesheets.Where(t => t.Date.Date == day.Date).ToList();
+                                var dayTotal = dayTimesheets.Sum(t => t.Hours);
+                                var isWeekend = day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday;
+
+                                @if (dayTimesheets.Any())
+                                {
+                                    @for (int i = 0; i < dayTimesheets.Count; i++)
+                                    {
+                                        var entry = dayTimesheets[i];
+                                        <tr class="@(isWeekend ? "table-secondary" : "")">
+                                            @if (i == 0)
+                                            {
+                                                <td rowspan="@(dayTimesheets.Count + 1)" class="align-middle fw-bold">
+                                                    @day.ToString("MMM dd")
+                                                </td>
+                                                <td rowspan="@(dayTimesheets.Count + 1)" class="align-middle">
+                                                    @day.ToString("ddd")
+                                                </td>
+                                            }
+                                            @if (editingEntryId == entry.Id)
+                                            {
+                                                <td>
+                                                    <select class="form-select form-select-sm" @bind="editingEntry.ProjectId" disabled="@isWeekLocked">
+                                                        <option value="0">Select Project</option>
+                                                        @foreach (var project in allocatedProjects)
+                                                        {
+                                                            <option value="@project.Id">@project.Name</option>
+                                                        }
+                                                    </select>
+                                                </td>
+                                                <td>
+                                                    <input type="number" class="form-control form-control-sm" step="0.5" min="0" max="24" 
+                                                           @bind="editingEntry.Hours" disabled="@isWeekLocked" />
+                                                </td>
+                                                <td>
+                                                    <textarea class="form-control form-control-sm" rows="2" 
+                                                              @bind="editingEntry.Description" disabled="@isWeekLocked"></textarea>
+                                                </td>
+                                                <td>
+                                                    <button class="btn btn-success btn-sm" @onclick="@(() => SaveEntry())" disabled="@isWeekLocked">
+                                                        <span class="bi bi-check-lg"></span> Save
+                                                    </button>
+                                                    <button class="btn btn-secondary btn-sm" @onclick="CancelEdit">
+                                                        <span class="bi bi-x-lg"></span>
+                                                    </button>
+                                                </td>
+                                            }
+                                            else
+                                            {
+                                                <td>
+                                                    <span class="badge bg-info text-dark">
+                                                        @(allocatedProjects.FirstOrDefault(p => p.Id == entry.ProjectId)?.Name ?? "Unknown")
+                                                    </span>
+                                                </td>
+                                                <td class="fw-bold">@entry.Hours</td>
+                                                <td>@entry.Description</td>
+                                                <td>
+                                                    <button class="btn btn-warning btn-sm" @onclick="@(() => EditEntry(entry))" disabled="@isWeekLocked">
+                                                        <span class="bi bi-pencil-fill"></span>
+                                                    </button>
+                                                    <button class="btn btn-danger btn-sm" @onclick="@(() => DeleteEntry(entry.Id))" disabled="@isWeekLocked">
+                                                        <span class="bi bi-trash-fill"></span>
+                                                    </button>
+                                                </td>
+                                            }
+                                        </tr>
+                                    }
+                                    <tr class="@(isWeekend ? "table-secondary" : "")">
+                                        @if (addingForDate == day)
+                                        {
+                                            <td>
+                                                <select class="form-select form-select-sm" @bind="newEntry.ProjectId" disabled="@isWeekLocked">
+                                                    <option value="0">Select Project</option>
+                                                    @foreach (var project in allocatedProjects)
+                                                    {
+                                                        <option value="@project.Id">@project.Name</option>
+                                                    }
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input type="number" class="form-control form-control-sm" step="0.5" min="0" max="24" 
+                                                       @bind="newEntry.Hours" disabled="@isWeekLocked" />
+                                            </td>
+                                            <td>
+                                                <textarea class="form-control form-control-sm" rows="2" 
+                                                          @bind="newEntry.Description" disabled="@isWeekLocked"></textarea>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-success btn-sm" @onclick="@(() => SaveNewEntry())" disabled="@isWeekLocked">
+                                                    <span class="bi bi-check-lg"></span> Save
+                                                </button>
+                                                <button class="btn btn-secondary btn-sm" @onclick="CancelAdd">
+                                                    <span class="bi bi-x-lg"></span>
+                                                </button>
+                                            </td>
+                                        }
+                                        else
+                                        {
+                                            <td colspan="4" class="text-end">
+                                                <button class="btn btn-primary btn-sm" @onclick="@(() => StartAddEntry(day))" disabled="@isWeekLocked">
+                                                    <span class="bi bi-plus-lg"></span> Add Entry
+                                                </button>
+                                                <span class="ms-3 fw-bold">Day Total: @dayTotal.ToString("0.0") hrs</span>
+                                            </td>
+                                        }
+                                    </tr>
+                                }
+                                else
+                                {
+                                    <tr class="@(isWeekend ? "table-secondary" : "")">
+                                        <td class="align-middle fw-bold">@day.ToString("MMM dd")</td>
+                                        <td class="align-middle">@day.ToString("ddd")</td>
+                                        @if (addingForDate == day)
+                                        {
+                                            <td>
+                                                <select class="form-select form-select-sm" @bind="newEntry.ProjectId" disabled="@isWeekLocked">
+                                                    <option value="0">Select Project</option>
+                                                    @foreach (var project in allocatedProjects)
+                                                    {
+                                                        <option value="@project.Id">@project.Name</option>
+                                                    }
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input type="number" class="form-control form-control-sm" step="0.5" min="0" max="24" 
+                                                       @bind="newEntry.Hours" disabled="@isWeekLocked" />
+                                            </td>
+                                            <td>
+                                                <textarea class="form-control form-control-sm" rows="2" 
+                                                          @bind="newEntry.Description" disabled="@isWeekLocked"></textarea>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-success btn-sm" @onclick="@(() => SaveNewEntry())" disabled="@isWeekLocked">
+                                                    <span class="bi bi-check-lg"></span> Save
+                                                </button>
+                                                <button class="btn btn-secondary btn-sm" @onclick="CancelAdd">
+                                                    <span class="bi bi-x-lg"></span>
+                                                </button>
+                                            </td>
+                                        }
+                                        else
+                                        {
+                                            <td colspan="4" class="text-muted">
+                                                <em>No entries for this day</em>
+                                                <button class="btn btn-primary btn-sm float-end" @onclick="@(() => StartAddEntry(day))" disabled="@isWeekLocked">
+                                                    <span class="bi bi-plus-lg"></span> Add Entry
+                                                </button>
+                                            </td>
+                                        }
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                        <tfoot class="table-light">
+                            <tr>
+                                <th colspan="3" class="text-end">Week Total:</th>
+                                <th class="text-primary fs-5">@GetWeekTotal().ToString("0.0") hrs</th>
+                                <th colspan="2"></th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <div class="row mt-3">
+                    <div class="col-md-12">
+                        <div class="btn-group float-end" role="group">
+                            <button class="btn btn-success" @onclick="SubmitWeek" disabled="@(!CanSubmitWeek())">
+                                <span class="bi bi-send-fill me-2"></span>Submit for Approval
+                            </button>
+                            <button class="btn btn-info text-white" @onclick="ExportToExcel">
+                                <span class="bi bi-file-earmark-excel-fill me-2"></span>Export to Excel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (allocatedProjects.Count == 0)
+        {
+            <div class="alert alert-warning">
+                <span class="bi bi-exclamation-triangle-fill me-2"></span>
+                <strong>No Projects Allocated:</strong> You don't have any active projects allocated to you. Please contact your manager.
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private int currentEmployeeId;
+    private int currentYear;
+    private int currentWeekNumber;
+    private List<Timesheet> timesheets = new();
+    private List<Project> allocatedProjects = new();
+    private bool isLoading = true;
+    private string? errorMessage;
+    private string? successMessage;
+    private string? weekStatus;
+    private bool isWeekLocked = false;
+
+    private Timesheet newEntry = new();
+    private Timesheet editingEntry = new();
+    private int editingEntryId = 0;
+    private DateTime? addingForDate = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                var email = user.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Email)?.Value;
+                if (!string.IsNullOrEmpty(email))
+                {
+                    var employee = await EmployeeRepository.GetByEmailAsync(email);
+                    if (employee != null)
+                    {
+                        currentEmployeeId = employee.Id;
+                        
+                        var now = DateTime.Now;
+                        currentYear = now.Year;
+                        currentWeekNumber = GetWeekNumber(now);
+
+                        await LoadWeekData();
+                    }
+                    else
+                    {
+                        errorMessage = "Employee not found. Please contact administrator.";
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading timesheet: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadWeekData()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+
+            // Load allocated projects
+            var allocations = await ProjectAllocationRepository.GetByEmployeeIdAsync(currentEmployeeId);
+            var activeAllocations = allocations.Where(a => a.IsActive).ToList();
+            
+            var projectIds = activeAllocations.Select(a => a.ProjectId).Distinct().ToList();
+            var allProjects = await ProjectRepository.GetAllAsync();
+            allocatedProjects = allProjects.Where(p => projectIds.Contains(p.Id) && p.IsActive).ToList();
+
+            // Load timesheet entries for the week
+            var weekData = await TimesheetRepository.GetByWeekAsync(currentEmployeeId, currentYear, currentWeekNumber);
+            timesheets = weekData.ToList();
+
+            // Determine week status
+            if (timesheets.Any())
+            {
+                var statuses = timesheets.Select(t => t.Status).Distinct().ToList();
+                if (statuses.Count == 1)
+                {
+                    weekStatus = statuses.First();
+                }
+                else if (statuses.Contains("Submitted"))
+                {
+                    weekStatus = "Partially Submitted";
+                }
+                else if (statuses.Contains("Approved"))
+                {
+                    weekStatus = "Partially Approved";
+                }
+                else
+                {
+                    weekStatus = "Draft";
+                }
+
+                isWeekLocked = timesheets.Any(t => t.IsLocked);
+            }
+            else
+            {
+                weekStatus = "Draft";
+                isWeekLocked = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading week data: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void StartAddEntry(DateTime date)
+    {
+        addingForDate = date;
+        newEntry = new Timesheet
+        {
+            EmployeeId = currentEmployeeId,
+            Date = date.Date,
+            Status = "Draft",
+            Hours = 8.0m
+        };
+    }
+
+    private void CancelAdd()
+    {
+        addingForDate = null;
+        newEntry = new Timesheet();
+    }
+
+    private async Task SaveNewEntry()
+    {
+        try
+        {
+            if (newEntry.ProjectId == 0)
+            {
+                errorMessage = "Please select a project.";
+                return;
+            }
+
+            if (newEntry.Hours <= 0 || newEntry.Hours > 24)
+            {
+                errorMessage = "Hours must be between 0 and 24.";
+                return;
+            }
+
+            newEntry.CreatedAt = DateTime.UtcNow;
+            await TimesheetRepository.CreateAsync(newEntry);
+
+            successMessage = "Entry added successfully.";
+            addingForDate = null;
+            newEntry = new Timesheet();
+            await LoadWeekData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error saving entry: {ex.Message}";
+        }
+    }
+
+    private void EditEntry(Timesheet entry)
+    {
+        editingEntryId = entry.Id;
+        editingEntry = new Timesheet
+        {
+            Id = entry.Id,
+            EmployeeId = entry.EmployeeId,
+            ProjectId = entry.ProjectId,
+            Date = entry.Date,
+            Hours = entry.Hours,
+            Description = entry.Description,
+            Status = entry.Status,
+            IsLocked = entry.IsLocked
+        };
+    }
+
+    private void CancelEdit()
+    {
+        editingEntryId = 0;
+        editingEntry = new Timesheet();
+    }
+
+    private async Task SaveEntry()
+    {
+        try
+        {
+            if (editingEntry.ProjectId == 0)
+            {
+                errorMessage = "Please select a project.";
+                return;
+            }
+
+            if (editingEntry.Hours <= 0 || editingEntry.Hours > 24)
+            {
+                errorMessage = "Hours must be between 0 and 24.";
+                return;
+            }
+
+            editingEntry.UpdatedAt = DateTime.UtcNow;
+            await TimesheetRepository.UpdateAsync(editingEntry);
+
+            successMessage = "Entry updated successfully.";
+            editingEntryId = 0;
+            editingEntry = new Timesheet();
+            await LoadWeekData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error updating entry: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteEntry(int id)
+    {
+        try
+        {
+            if (await JSRuntime.InvokeAsync<bool>("confirm", "Are you sure you want to delete this entry?"))
+            {
+                await TimesheetRepository.DeleteAsync(id);
+                successMessage = "Entry deleted successfully.";
+                await LoadWeekData();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error deleting entry: {ex.Message}";
+        }
+    }
+
+    private async Task SubmitWeek()
+    {
+        try
+        {
+            if (!CanSubmitWeek())
+            {
+                errorMessage = "Cannot submit week. Please ensure you have entries to submit.";
+                return;
+            }
+
+            var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", 
+                "Are you sure you want to submit this week for approval? You won't be able to edit it afterwards.");
+
+            if (confirmed)
+            {
+                foreach (var entry in timesheets)
+                {
+                    entry.Status = "Submitted";
+                    entry.UpdatedAt = DateTime.UtcNow;
+                    await TimesheetRepository.UpdateAsync(entry);
+                }
+
+                await TimesheetRepository.LockWeekAsync(currentEmployeeId, currentYear, currentWeekNumber);
+
+                successMessage = "Week submitted successfully for approval.";
+                await LoadWeekData();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error submitting week: {ex.Message}";
+        }
+    }
+
+    private async Task ExportToExcel()
+    {
+        try
+        {
+            var startDate = GetWeekStartDate();
+            var endDate = GetWeekEndDate();
+            var weekData = await TimesheetRepository.GetByEmployeeIdAndDateRangeAsync(currentEmployeeId, startDate, endDate);
+            
+            var excelData = ExcelExportService.ExportTimesheets(weekData);
+            var fileName = $"Timesheet_Week{currentWeekNumber}_{currentYear}.xlsx";
+
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(excelData));
+            successMessage = "Excel file exported successfully.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error exporting to Excel: {ex.Message}";
+        }
+    }
+
+    private bool CanSubmitWeek()
+    {
+        return timesheets.Any() && !isWeekLocked && (weekStatus == "Draft" || weekStatus == null);
+    }
+
+    private async Task PreviousWeek()
+    {
+        currentWeekNumber--;
+        if (currentWeekNumber < 1)
+        {
+            currentWeekNumber = 52;
+            currentYear--;
+        }
+        await LoadWeekData();
+    }
+
+    private async Task NextWeek()
+    {
+        if (!IsFutureWeek())
+        {
+            currentWeekNumber++;
+            if (currentWeekNumber > 52)
+            {
+                currentWeekNumber = 1;
+                currentYear++;
+            }
+            await LoadWeekData();
+        }
+    }
+
+    private async Task GoToCurrentWeek()
+    {
+        var now = DateTime.Now;
+        currentYear = now.Year;
+        currentWeekNumber = GetWeekNumber(now);
+        await LoadWeekData();
+    }
+
+    private bool IsFutureWeek()
+    {
+        var now = DateTime.Now;
+        var thisYear = now.Year;
+        var thisWeek = GetWeekNumber(now);
+
+        if (currentYear > thisYear) return true;
+        if (currentYear == thisYear && currentWeekNumber >= thisWeek) return true;
+        return false;
+    }
+
+    private DateTime GetWeekStartDate()
+    {
+        var jan1 = new DateTime(currentYear, 1, 1);
+        var daysOffset = DayOfWeek.Monday - jan1.DayOfWeek;
+        var firstMonday = jan1.AddDays(daysOffset);
+        return firstMonday.AddDays((currentWeekNumber - 1) * 7);
+    }
+
+    private DateTime GetWeekEndDate()
+    {
+        return GetWeekStartDate().AddDays(6);
+    }
+
+    private List<DateTime> GetWeekDays()
+    {
+        var days = new List<DateTime>();
+        var startDate = GetWeekStartDate();
+        for (int i = 0; i < 7; i++)
+        {
+            days.Add(startDate.AddDays(i));
+        }
+        return days;
+    }
+
+    private decimal GetWeekTotal()
+    {
+        return timesheets.Sum(t => t.Hours);
+    }
+
+    private int GetWeekNumber(DateTime date)
+    {
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        return culture.Calendar.GetWeekOfYear(date, 
+            System.Globalization.CalendarWeekRule.FirstDay, DayOfWeek.Monday);
+    }
+
+    private string GetStatusAlertClass(string status)
+    {
+        return status switch
+        {
+            "Draft" => "alert-info",
+            "Submitted" => "alert-warning",
+            "Approved" => "alert-success",
+            "Rejected" => "alert-danger",
+            _ => "alert-secondary"
+        };
+    }
+
+    private string GetStatusIcon(string status)
+    {
+        return status switch
+        {
+            "Draft" => "bi-pencil-square",
+            "Submitted" => "bi-hourglass-split",
+            "Approved" => "bi-check-circle-fill",
+            "Rejected" => "bi-x-circle-fill",
+            _ => "bi-info-circle"
+        };
+    }
+}
