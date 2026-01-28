@@ -63,7 +63,7 @@ A comprehensive .NET 10 C# Blazor web server application for internal company ma
 
 - .NET 10 SDK
 - SQL Server (LocalDB, Express, or Full Edition)
-- Visual Studio 2022 or Visual Studio Code
+- Visual Studio 2022/2026 or Visual Studio Code
 - SQL Server Management Studio (optional, for database management)
 
 ## Installation & Setup
@@ -110,15 +110,21 @@ The script will:
 
 ### 4. Build and Run
 
+#### Using Visual Studio 2022/2026
+1. Open `VibePontaj.sln` in Visual Studio
+2. Press F5 or click the "Run" button to build and start the application
+3. Visual Studio will automatically restore NuGet packages and build the solution
+
+#### Using Command Line
 ```bash
 # Restore dependencies
-dotnet restore
+dotnet restore VibePontaj.sln
 
 # Build the project
-dotnet build
+dotnet build VibePontaj.sln
 
 # Run the application
-dotnet run
+dotnet run --project VibePontaj.csproj
 ```
 
 The application will start and be available at:
