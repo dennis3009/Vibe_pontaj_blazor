@@ -1,0 +1,606 @@
+@page "/attendance"
+@attribute [Authorize]
+@inject IAttendanceRepository AttendanceRepository
+@inject IEmployeeRepository EmployeeRepository
+@inject IExcelExportService ExcelExportService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Attendance - VibePontaj</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-3">
+        <div class="col-md-12">
+            <h2>
+                <span class="bi bi-calendar-check-fill me-2"></span>
+                My Attendance
+            </h2>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @errorMessage
+            <button type="button" class="btn-close" @onclick="@(() => errorMessage = null)"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            @successMessage
+            <button type="button" class="btn-close" @onclick="@(() => successMessage = null)"></button>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="text-center my-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading attendance...</p>
+        </div>
+    }
+    else
+    {
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white">
+                <div class="row align-items-center">
+                    <div class="col-md-3">
+                        <button class="btn btn-light btn-sm" @onclick="PreviousMonth">
+                            <span class="bi bi-chevron-left"></span> Previous Month
+                        </button>
+                    </div>
+                    <div class="col-md-6 text-center">
+                        <h5 class="mb-0">
+                            @currentDate.ToString("MMMM yyyy")
+                        </h5>
+                    </div>
+                    <div class="col-md-3 text-end">
+                        <button class="btn btn-light btn-sm" @onclick="GoToCurrentMonth">
+                            <span class="bi bi-calendar-today"></span> Current Month
+                        </button>
+                        <button class="btn btn-light btn-sm ms-2" @onclick="NextMonth">
+                            Next Month <span class="bi bi-chevron-right"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-12">
+                        <button class="btn btn-info text-white float-end" @onclick="ExportToExcel">
+                            <span class="bi bi-file-earmark-excel-fill me-2"></span>Export to Excel
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Legend -->
+                <div class="row mb-3">
+                    <div class="col-md-12">
+                        <div class="d-flex flex-wrap gap-2">
+                            <span class="badge bg-primary">WFO - Work From Office</span>
+                            <span class="badge bg-success">WFH - Work From Home</span>
+                            <span class="badge bg-info text-dark">TB - Travel/Business</span>
+                            <span class="badge bg-warning text-dark">SC - Sick</span>
+                            <span class="badge bg-danger">PL - Paid Leave</span>
+                            <span class="badge bg-danger">UL - Unpaid Leave</span>
+                            <span class="badge bg-danger">AL - Absent/Leave</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Calendar Grid -->
+                <div class="table-responsive">
+                    <table class="table table-bordered attendance-calendar">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="text-center">Monday</th>
+                                <th class="text-center">Tuesday</th>
+                                <th class="text-center">Wednesday</th>
+                                <th class="text-center">Thursday</th>
+                                <th class="text-center">Friday</th>
+                                <th class="text-center">Saturday</th>
+                                <th class="text-center">Sunday</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var week in GetCalendarWeeks())
+                            {
+                                <tr>
+                                    @foreach (var day in week)
+                                    {
+                                        var attendance = GetAttendanceForDate(day);
+                                        var isToday = day.Date == DateTime.Today;
+                                        var isFutureDate = day.Date > DateTime.Today;
+                                        var isCurrentMonth = day.Month == currentDate.Month;
+                                        var cellClass = GetCellClass(day, isToday, isFutureDate, isCurrentMonth);
+                                        
+                                        <td class="@cellClass" style="height: 120px; vertical-align: top; cursor: @(isFutureDate ? "not-allowed" : "pointer");" 
+                                            @onclick="@(() => OpenEditModal(day))">
+                                            <div class="d-flex flex-column h-100">
+                                                <div class="mb-2">
+                                                    <strong class="@(isToday ? "text-primary" : "")">@day.Day</strong>
+                                                </div>
+                                                @if (attendance != null && isCurrentMonth)
+                                                {
+                                                    <div class="flex-grow-1">
+                                                        <span class="badge @GetStatusBadgeClass(attendance.Status) w-100 mb-1">
+                                                            @attendance.Status
+                                                        </span>
+                                                        @if (!string.IsNullOrWhiteSpace(attendance.Notes))
+                                                        {
+                                                            <small class="text-muted d-block text-truncate" title="@attendance.Notes">
+                                                                @attendance.Notes
+                                                            </small>
+                                                        }
+                                                    </div>
+                                                }
+                                                else if (isCurrentMonth && !isFutureDate)
+                                                {
+                                                    <div class="flex-grow-1">
+                                                        <small class="text-muted"><em>No status</em></small>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Summary Statistics -->
+                <div class="row mt-4">
+                    <div class="col-md-12">
+                        <h5>Monthly Summary</h5>
+                        <div class="row">
+                            <div class="col-md-3 mb-2">
+                                <div class="card bg-primary text-white">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0">WFO: @GetStatusCount("WFO") days</h6>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <div class="card bg-success text-white">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0">WFH: @GetStatusCount("WFH") days</h6>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <div class="card bg-info text-dark">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0">TB: @GetStatusCount("TB") days</h6>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <div class="card bg-warning text-dark">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0">SC: @GetStatusCount("SC") days</h6>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4 mb-2">
+                                <div class="card bg-danger text-white">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0">PL: @GetStatusCount("PL") days</h6>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-2">
+                                <div class="card bg-danger text-white">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0">UL: @GetStatusCount("UL") days</h6>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-2">
+                                <div class="card bg-danger text-white">
+                                    <div class="card-body p-2">
+                                        <h6 class="mb-0">AL: @GetStatusCount("AL") days</h6>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Edit Attendance Modal -->
+@if (showEditModal)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <span class="bi bi-calendar-check me-2"></span>
+                        Attendance for @selectedDate.ToString("MMMM dd, yyyy")
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseEditModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (selectedDate > DateTime.Today)
+                    {
+                        <div class="alert alert-warning">
+                            <span class="bi bi-exclamation-triangle-fill me-2"></span>
+                            Cannot set attendance for future dates.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Status <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="editingAttendance.Status">
+                                <option value="WFO">WFO - Work From Office</option>
+                                <option value="WFH">WFH - Work From Home</option>
+                                <option value="TB">TB - Travel/Business</option>
+                                <option value="SC">SC - Sick</option>
+                                <option value="PL">PL - Paid Leave</option>
+                                <option value="UL">UL - Unpaid Leave</option>
+                                <option value="AL">AL - Absent/Leave</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Notes</label>
+                            <textarea class="form-control" rows="3" @bind="editingAttendance.Notes" 
+                                      placeholder="Add any additional notes (optional)"></textarea>
+                            <small class="text-muted">Optional: Add details about your attendance</small>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(modalErrorMessage))
+                        {
+                            <div class="alert alert-danger">
+                                @modalErrorMessage
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    @if (selectedDate <= DateTime.Today)
+                    {
+                        @if (editingAttendance.Id > 0)
+                        {
+                            <button type="button" class="btn btn-danger" @onclick="DeleteAttendance">
+                                <span class="bi bi-trash-fill me-2"></span>Delete
+                            </button>
+                        }
+                        <button type="button" class="btn btn-secondary" @onclick="CloseEditModal">Cancel</button>
+                        <button type="button" class="btn btn-primary" @onclick="SaveAttendance">
+                            <span class="bi bi-check-lg me-2"></span>Save
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-secondary" @onclick="CloseEditModal">Close</button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .attendance-calendar td {
+        min-width: 120px;
+    }
+
+    .attendance-calendar .weekend-cell {
+        background-color: #f8f9fa;
+    }
+
+    .attendance-calendar .today-cell {
+        border: 2px solid #0d6efd;
+    }
+
+    .attendance-calendar .other-month-cell {
+        opacity: 0.4;
+    }
+
+    .attendance-calendar .future-cell {
+        background-color: #f0f0f0;
+    }
+
+    .attendance-calendar td:hover:not(.future-cell) {
+        background-color: #e7f3ff;
+    }
+</style>
+
+@code {
+    private int currentEmployeeId;
+    private DateTime currentDate = DateTime.Today;
+    private List<Attendance> monthAttendance = new();
+    private bool isLoading = true;
+    private string? errorMessage;
+    private string? successMessage;
+    private string? modalErrorMessage;
+    
+    private bool showEditModal = false;
+    private DateTime selectedDate;
+    private Attendance editingAttendance = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                var email = user.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Email)?.Value;
+                if (!string.IsNullOrEmpty(email))
+                {
+                    var employee = await EmployeeRepository.GetByEmailAsync(email);
+                    if (employee != null)
+                    {
+                        currentEmployeeId = employee.Id;
+                        await LoadMonthData();
+                    }
+                    else
+                    {
+                        errorMessage = "Employee not found. Please contact administrator.";
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading attendance: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadMonthData()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+
+            var year = currentDate.Year;
+            var month = currentDate.Month;
+
+            var attendanceData = await AttendanceRepository.GetByEmployeeIdAndMonthAsync(currentEmployeeId, year, month);
+            monthAttendance = attendanceData.ToList();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading month data: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task PreviousMonth()
+    {
+        currentDate = currentDate.AddMonths(-1);
+        await LoadMonthData();
+    }
+
+    private async Task NextMonth()
+    {
+        currentDate = currentDate.AddMonths(1);
+        await LoadMonthData();
+    }
+
+    private async Task GoToCurrentMonth()
+    {
+        currentDate = DateTime.Today;
+        await LoadMonthData();
+    }
+
+    private List<List<DateTime>> GetCalendarWeeks()
+    {
+        var weeks = new List<List<DateTime>>();
+        var firstDayOfMonth = new DateTime(currentDate.Year, currentDate.Month, 1);
+        var lastDayOfMonth = firstDayOfMonth.AddMonths(1).AddDays(-1);
+
+        // Find the Monday before or on the first day of the month
+        var startDate = firstDayOfMonth;
+        while (startDate.DayOfWeek != DayOfWeek.Monday)
+        {
+            startDate = startDate.AddDays(-1);
+        }
+
+        // Find the Sunday after or on the last day of the month
+        var endDate = lastDayOfMonth;
+        while (endDate.DayOfWeek != DayOfWeek.Sunday)
+        {
+            endDate = endDate.AddDays(1);
+        }
+
+        var currentWeek = new List<DateTime>();
+        for (var date = startDate; date <= endDate; date = date.AddDays(1))
+        {
+            currentWeek.Add(date);
+            
+            if (date.DayOfWeek == DayOfWeek.Sunday)
+            {
+                weeks.Add(currentWeek);
+                currentWeek = new List<DateTime>();
+            }
+        }
+
+        return weeks;
+    }
+
+    private Attendance? GetAttendanceForDate(DateTime date)
+    {
+        return monthAttendance.FirstOrDefault(a => a.Date.Date == date.Date);
+    }
+
+    private string GetCellClass(DateTime date, bool isToday, bool isFutureDate, bool isCurrentMonth)
+    {
+        var classes = new List<string>();
+
+        if (isToday)
+            classes.Add("today-cell");
+
+        if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
+            classes.Add("weekend-cell");
+
+        if (!isCurrentMonth)
+            classes.Add("other-month-cell");
+
+        if (isFutureDate)
+            classes.Add("future-cell");
+
+        return string.Join(" ", classes);
+    }
+
+    private string GetStatusBadgeClass(string status)
+    {
+        return status switch
+        {
+            "WFO" => "bg-primary",
+            "WFH" => "bg-success",
+            "TB" => "bg-info text-dark",
+            "SC" => "bg-warning text-dark",
+            "PL" => "bg-danger",
+            "UL" => "bg-danger",
+            "AL" => "bg-danger",
+            _ => "bg-secondary"
+        };
+    }
+
+    private int GetStatusCount(string status)
+    {
+        return monthAttendance.Count(a => a.Status == status && a.Date.Month == currentDate.Month);
+    }
+
+    private void OpenEditModal(DateTime date)
+    {
+        if (date > DateTime.Today)
+        {
+            return;
+        }
+
+        selectedDate = date;
+        modalErrorMessage = null;
+        
+        var existingAttendance = GetAttendanceForDate(date);
+        if (existingAttendance != null)
+        {
+            editingAttendance = new Attendance
+            {
+                Id = existingAttendance.Id,
+                EmployeeId = existingAttendance.EmployeeId,
+                Date = existingAttendance.Date,
+                Status = existingAttendance.Status,
+                Notes = existingAttendance.Notes
+            };
+        }
+        else
+        {
+            editingAttendance = new Attendance
+            {
+                EmployeeId = currentEmployeeId,
+                Date = date.Date,
+                Status = "WFO",
+                Notes = null
+            };
+        }
+
+        showEditModal = true;
+    }
+
+    private void CloseEditModal()
+    {
+        showEditModal = false;
+        modalErrorMessage = null;
+        editingAttendance = new Attendance();
+    }
+
+    private async Task SaveAttendance()
+    {
+        try
+        {
+            modalErrorMessage = null;
+
+            if (string.IsNullOrWhiteSpace(editingAttendance.Status))
+            {
+                modalErrorMessage = "Please select a status.";
+                return;
+            }
+
+            if (editingAttendance.Id > 0)
+            {
+                // Update existing attendance
+                editingAttendance.UpdatedAt = DateTime.UtcNow;
+                await AttendanceRepository.UpdateAsync(editingAttendance);
+                successMessage = "Attendance updated successfully.";
+            }
+            else
+            {
+                // Create new attendance
+                editingAttendance.CreatedAt = DateTime.UtcNow;
+                await AttendanceRepository.CreateAsync(editingAttendance);
+                successMessage = "Attendance added successfully.";
+            }
+
+            await LoadMonthData();
+            CloseEditModal();
+        }
+        catch (Exception ex)
+        {
+            modalErrorMessage = $"Error saving attendance: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteAttendance()
+    {
+        try
+        {
+            if (await JSRuntime.InvokeAsync<bool>("confirm", "Are you sure you want to delete this attendance record?"))
+            {
+                await AttendanceRepository.DeleteAsync(editingAttendance.Id);
+                successMessage = "Attendance deleted successfully.";
+                await LoadMonthData();
+                CloseEditModal();
+            }
+        }
+        catch (Exception ex)
+        {
+            modalErrorMessage = $"Error deleting attendance: {ex.Message}";
+        }
+    }
+
+    private async Task ExportToExcel()
+    {
+        try
+        {
+            var year = currentDate.Year;
+            var month = currentDate.Month;
+            var attendanceData = await AttendanceRepository.GetByEmployeeIdAndMonthAsync(currentEmployeeId, year, month);
+            
+            var excelData = ExcelExportService.ExportAttendance(attendanceData);
+            var fileName = $"Attendance_{currentDate:yyyy_MM}.xlsx";
+
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(excelData));
+            successMessage = "Excel file exported successfully.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error exporting to Excel: {ex.Message}";
+        }
+    }
+}
