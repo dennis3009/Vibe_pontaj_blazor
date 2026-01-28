@@ -1,0 +1,121 @@
+@page "/login"
+@rendermode InteractiveServer
+@layout Components.Layout.MainLayout
+@inject IAuthService AuthService
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Login - VibePontaj</PageTitle>
+
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-4">
+            <div class="card shadow">
+                <div class="card-body">
+                    <h3 class="card-title text-center mb-4">VibePontaj Login</h3>
+                    
+                    @if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        <div class="alert alert-danger" role="alert">
+                            @errorMessage
+                        </div>
+                    }
+                    
+                    <EditForm Model="@loginModel" OnValidSubmit="@HandleLogin">
+                        <DataAnnotationsValidator />
+                        
+                        <div class="mb-3">
+                            <label for="email" class="form-label">Email</label>
+                            <InputText id="email" class="form-control" @bind-Value="loginModel.Email" placeholder="admin@vibe.com" />
+                            <ValidationMessage For="@(() => loginModel.Email)" />
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Password</label>
+                            <InputText id="password" type="password" class="form-control" @bind-Value="loginModel.Password" placeholder="Admin@123" />
+                            <ValidationMessage For="@(() => loginModel.Password)" />
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary" disabled="@isLoading">
+                                @if (isLoading)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                }
+                                Login
+                            </button>
+                        </div>
+                    </EditForm>
+                    
+                    <div class="mt-3 text-center text-muted small">
+                        <p>Default credentials:</p>
+                        <p>Email: admin@vibe.com</p>
+                        <p>Password: Admin@123</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private LoginModel loginModel = new();
+    private string? errorMessage;
+    private bool isLoading = false;
+
+    protected override void OnInitialized()
+    {
+        // Clear error message on fresh page load
+        errorMessage = null;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Ensure we're in interactive mode
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleLogin()
+    {
+        isLoading = true;
+        errorMessage = null;
+        StateHasChanged(); // Force UI update to show loading state
+        
+        try
+        {
+            var user = await AuthService.AuthenticateAsync(loginModel.Email, loginModel.Password);
+            
+            if (user != null)
+            {
+                var customAuthStateProvider = (CustomAuthenticationStateProvider)AuthenticationStateProvider;
+                await customAuthStateProvider.UpdateAuthenticationState(user.Email);
+                
+                NavigationManager.NavigateTo("/timesheet");
+            }
+            else
+            {
+                errorMessage = "Invalid email or password.";
+                StateHasChanged(); // Force UI update to show error
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"An error occurred: {ex.Message}";
+            StateHasChanged(); // Force UI update to show error
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged(); // Ensure UI updates with final state
+        }
+    }
+
+    public class LoginModel
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+}

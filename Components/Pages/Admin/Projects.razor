@@ -1,0 +1,323 @@
+@page "/admin/projects"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Admin")]
+@inject IProjectRepository ProjectRepository
+@inject IExcelExportService ExcelExportService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Manage Projects - VibePontaj</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-3">
+        <div class="col-md-12">
+            <h2>
+                <span class="bi bi-folder-fill me-2"></span>
+                Manage Projects
+            </h2>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @errorMessage
+            <button type="button" class="btn-close" @onclick="@(() => errorMessage = null)"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            @successMessage
+            <button type="button" class="btn-close" @onclick="@(() => successMessage = null)"></button>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="text-center my-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading projects...</p>
+        </div>
+    }
+    else
+    {
+        <div class="row mb-3">
+            <div class="col-md-12">
+                <button class="btn btn-primary" @onclick="ShowAddModal">
+                    <span class="bi bi-plus-lg me-2"></span>Add New Project
+                </button>
+                <button class="btn btn-success ms-2" @onclick="ExportToExcel">
+                    <span class="bi bi-file-earmark-excel-fill me-2"></span>Export to Excel
+                </button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>ID</th>
+                                <th>Code</th>
+                                <th>Name</th>
+                                <th>Description</th>
+                                <th>Start Date</th>
+                                <th>End Date</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (projects == null || !projects.Any())
+                            {
+                                <tr>
+                                    <td colspan="8" class="text-center text-muted">No projects found</td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var project in projects)
+                                {
+                                    <tr>
+                                        <td>@project.Id</td>
+                                        <td><span class="badge bg-secondary">@project.ProjectCode</span></td>
+                                        <td>@project.Name</td>
+                                        <td>@project.Description</td>
+                                        <td>@project.StartDate.ToString("MMM dd, yyyy")</td>
+                                        <td>@(project.EndDate?.ToString("MMM dd, yyyy") ?? "Ongoing")</td>
+                                        <td>
+                                            <span class="badge bg-@(project.IsActive ? "success" : "secondary")">
+                                                @(project.IsActive ? "Active" : "Inactive")
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-sm btn-warning" @onclick="() => ShowEditModal(project)">
+                                                <span class="bi bi-pencil-fill"></span>
+                                            </button>
+                                            @if (project.IsActive)
+                                            {
+                                                <button class="btn btn-sm btn-danger ms-1" @onclick="() => DeactivateProject(project)">
+                                                    <span class="bi bi-x-circle-fill"></span>
+                                                </button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@* Add/Edit Modal *@
+@if (showModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        @(isEditMode ? "Edit Project" : "Add New Project")
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Project Code <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" @bind="currentProject.ProjectCode" placeholder="e.g., PROJ-001" />
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Project Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" @bind="currentProject.Name" />
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-12 mb-3">
+                            <label class="form-label">Description</label>
+                            <textarea class="form-control" rows="3" @bind="currentProject.Description"></textarea>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Start Date <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" @bind="currentProject.StartDate" />
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">End Date</label>
+                            <input type="date" class="form-control" @bind="endDateInput" />
+                        </div>
+                    </div>
+                    @if (isEditMode)
+                    {
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" @bind="currentProject.IsActive" id="isActive" />
+                                    <label class="form-check-label" for="isActive">
+                                        Active
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveProject">
+                        <span class="bi bi-save me-2"></span>Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Project> projects = new();
+    private Project currentProject = new();
+    private DateTime? endDateInput;
+    private bool isLoading = true;
+    private bool showModal = false;
+    private bool isEditMode = false;
+    private string? errorMessage;
+    private string? successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProjects();
+    }
+
+    private async Task LoadProjects()
+    {
+        try
+        {
+            isLoading = true;
+            var result = await ProjectRepository.GetAllAsync();
+            projects = result.ToList();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading projects: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void ShowAddModal()
+    {
+        currentProject = new Project
+        {
+            StartDate = DateTime.Today,
+            IsActive = true
+        };
+        endDateInput = null;
+        isEditMode = false;
+        showModal = true;
+        errorMessage = null;
+    }
+
+    private void ShowEditModal(Project project)
+    {
+        currentProject = new Project
+        {
+            Id = project.Id,
+            Name = project.Name,
+            Description = project.Description,
+            ProjectCode = project.ProjectCode,
+            StartDate = project.StartDate,
+            EndDate = project.EndDate,
+            IsActive = project.IsActive
+        };
+        endDateInput = project.EndDate;
+        isEditMode = true;
+        showModal = true;
+        errorMessage = null;
+    }
+
+    private void CloseModal()
+    {
+        showModal = false;
+        currentProject = new();
+        endDateInput = null;
+    }
+
+    private async Task SaveProject()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(currentProject.Name) ||
+                string.IsNullOrWhiteSpace(currentProject.ProjectCode))
+            {
+                errorMessage = "Please fill in all required fields.";
+                return;
+            }
+
+            currentProject.EndDate = endDateInput;
+
+            if (isEditMode)
+            {
+                currentProject.UpdatedAt = DateTime.UtcNow;
+                await ProjectRepository.UpdateAsync(currentProject);
+                successMessage = "Project updated successfully.";
+            }
+            else
+            {
+                currentProject.CreatedAt = DateTime.UtcNow;
+                await ProjectRepository.CreateAsync(currentProject);
+                successMessage = "Project created successfully.";
+            }
+
+            CloseModal();
+            await LoadProjects();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error saving project: {ex.Message}";
+        }
+    }
+
+    private async Task DeactivateProject(Project project)
+    {
+        try
+        {
+            bool confirmed = await JSRuntime.InvokeAsync<bool>("confirm", 
+                $"Are you sure you want to deactivate project '{project.Name}'?");
+            
+            if (confirmed)
+            {
+                await ProjectRepository.DeleteAsync(project.Id);
+                successMessage = $"Project '{project.Name}' deactivated successfully.";
+                await LoadProjects();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error deactivating project: {ex.Message}";
+        }
+    }
+
+    private async Task ExportToExcel()
+    {
+        try
+        {
+            var data = ExcelExportService.ExportProjects(projects);
+            var fileName = $"Projects_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(data));
+            successMessage = "Projects exported successfully.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error exporting to Excel: {ex.Message}";
+        }
+    }
+}
