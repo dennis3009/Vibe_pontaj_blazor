@@ -1,4 +1,5 @@
 @page "/admin/allocations"
+@rendermode InteractiveServer
 @attribute [Authorize(Roles = "Admin")]
 @inject IProjectAllocationRepository AllocationRepository
 @inject IEmployeeRepository EmployeeRepository

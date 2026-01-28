@@ -1,4 +1,5 @@
 @page "/admin/projects"
+@rendermode InteractiveServer
 @attribute [Authorize(Roles = "Admin")]
 @inject IProjectRepository ProjectRepository
 @inject IExcelExportService ExcelExportService

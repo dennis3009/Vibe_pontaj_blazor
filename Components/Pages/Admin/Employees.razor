@@ -1,4 +1,5 @@
 @page "/admin/employees"
+@rendermode InteractiveServer
 @attribute [Authorize(Roles = "Admin")]
 @inject IEmployeeRepository EmployeeRepository
 @inject IAuthService AuthService
