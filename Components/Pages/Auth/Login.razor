@@ -67,12 +67,24 @@
     protected override void OnInitialized()
     {
         loginModel ??= new();
+        // Clear error message on fresh page load
+        errorMessage = null;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Ensure we're in interactive mode
+            StateHasChanged();
+        }
     }
 
     private async Task HandleLogin()
     {
         isLoading = true;
         errorMessage = null;
+        StateHasChanged(); // Force UI update to show loading state
         
         try
         {
@@ -88,15 +100,15 @@
             else
             {
                 errorMessage = "Invalid email or password.";
+                isLoading = false;
+                StateHasChanged(); // Force UI update to show error
             }
         }
         catch (Exception ex)
         {
             errorMessage = $"An error occurred: {ex.Message}";
-        }
-        finally
-        {
             isLoading = false;
+            StateHasChanged(); // Force UI update to show error
         }
     }
 
