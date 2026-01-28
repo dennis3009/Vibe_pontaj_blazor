@@ -20,7 +20,7 @@
                         </div>
                     }
                     
-                    <EditForm Model="@loginModel" OnValidSubmit="@HandleLogin">
+                    <EditForm Model="@loginModel" OnValidSubmit="@HandleLogin" FormName="LoginForm">
                         <DataAnnotationsValidator />
                         
                         <div class="mb-3">
@@ -58,9 +58,15 @@
 </div>
 
 @code {
-    private LoginModel loginModel = new();
+    [SupplyParameterFromForm]
+    private LoginModel loginModel { get; set; } = default!;
     private string? errorMessage;
     private bool isLoading = false;
+
+    protected override void OnInitialized()
+    {
+        loginModel ??= new();
+    }
 
     private async Task HandleLogin()
     {
