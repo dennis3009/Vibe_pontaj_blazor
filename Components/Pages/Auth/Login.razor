@@ -93,7 +93,7 @@
                 var customAuthStateProvider = (CustomAuthenticationStateProvider)AuthenticationStateProvider;
                 await customAuthStateProvider.UpdateAuthenticationState(user.Email);
                 
-                NavigationManager.NavigateTo("/", forceLoad: true);
+                NavigationManager.NavigateTo("/timesheet");
             }
             else
             {
