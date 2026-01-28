@@ -15,13 +15,22 @@ public class ProjectAllocationRepository : IProjectAllocationRepository
     public async Task<IEnumerable<ProjectAllocation>> GetAllAsync()
     {
         using var connection = _context.CreateConnection();
-        var sql = @"SELECT pa.*, e.FirstName, e.LastName, e.Email, p.Name as ProjectName, p.ProjectCode
+        var sql = @"SELECT pa.*, e.Id, e.FirstName, e.LastName, e.Email, e.Role, 
+                           p.Id, p.Name, p.ProjectCode, p.Description
                     FROM ProjectAllocations pa
                     INNER JOIN Employees e ON pa.EmployeeId = e.Id
                     INNER JOIN Projects p ON pa.ProjectId = p.Id
                     WHERE pa.IsActive = 1
                     ORDER BY pa.StartDate DESC";
-        return await connection.QueryAsync<ProjectAllocation>(sql);
+        return await connection.QueryAsync<ProjectAllocation, Employee, Project, ProjectAllocation>(
+            sql,
+            (allocation, employee, project) =>
+            {
+                allocation.Employee = employee;
+                allocation.Project = project;
+                return allocation;
+            },
+            splitOn: "Id,Id");
     }
 
     public async Task<IEnumerable<ProjectAllocation>> GetByEmployeeIdAsync(int employeeId)

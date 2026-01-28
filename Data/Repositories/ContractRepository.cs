@@ -15,12 +15,19 @@ public class ContractRepository : IContractRepository
     public async Task<IEnumerable<Contract>> GetAllAsync()
     {
         using var connection = _context.CreateConnection();
-        var sql = @"SELECT c.*, e.FirstName, e.LastName, e.Email
+        var sql = @"SELECT c.*, e.Id, e.FirstName, e.LastName, e.Email, e.Role
                     FROM Contracts c
                     INNER JOIN Employees e ON c.EmployeeId = e.Id
                     WHERE c.IsActive = 1
                     ORDER BY c.StartDate DESC";
-        return await connection.QueryAsync<Contract>(sql);
+        return await connection.QueryAsync<Contract, Employee, Contract>(
+            sql,
+            (contract, employee) =>
+            {
+                contract.Employee = employee;
+                return contract;
+            },
+            splitOn: "Id");
     }
 
     public async Task<IEnumerable<Contract>> GetByEmployeeIdAsync(int employeeId)

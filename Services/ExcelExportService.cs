@@ -11,6 +11,7 @@ public interface IExcelExportService
     byte[] ExportAttendance(IEnumerable<Attendance> attendance);
     byte[] ExportLeaves(IEnumerable<Leave> leaves);
     byte[] ExportContracts(IEnumerable<Contract> contracts);
+    byte[] ExportProjectAllocations(IEnumerable<ProjectAllocation> allocations);
 }
 
 public class ExcelExportService : IExcelExportService
@@ -232,6 +233,43 @@ public class ExcelExportService : IExcelExportService
             worksheet.Cell(row, 6).Value = contract.HourlyRate;
             worksheet.Cell(row, 7).Value = contract.WorkingHoursPerDay;
             worksheet.Cell(row, 8).Value = contract.IsActive ? "Yes" : "No";
+            row++;
+        }
+        
+        worksheet.Columns().AdjustToContents();
+        
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
+    }
+
+    public byte[] ExportProjectAllocations(IEnumerable<ProjectAllocation> allocations)
+    {
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("Project Allocations");
+        
+        worksheet.Cell(1, 1).Value = "ID";
+        worksheet.Cell(1, 2).Value = "Employee";
+        worksheet.Cell(1, 3).Value = "Project";
+        worksheet.Cell(1, 4).Value = "Project Code";
+        worksheet.Cell(1, 5).Value = "Start Date";
+        worksheet.Cell(1, 6).Value = "End Date";
+        worksheet.Cell(1, 7).Value = "Active";
+        
+        var headerRange = worksheet.Range(1, 1, 1, 7);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Fill.BackgroundColor = XLColor.LightGray;
+        
+        int row = 2;
+        foreach (var allocation in allocations)
+        {
+            worksheet.Cell(row, 1).Value = allocation.Id;
+            worksheet.Cell(row, 2).Value = allocation.Employee?.FullName ?? "";
+            worksheet.Cell(row, 3).Value = allocation.Project?.Name ?? "";
+            worksheet.Cell(row, 4).Value = allocation.Project?.ProjectCode ?? "";
+            worksheet.Cell(row, 5).Value = allocation.StartDate;
+            worksheet.Cell(row, 6).Value = allocation.EndDate?.ToString("yyyy-MM-dd") ?? "";
+            worksheet.Cell(row, 7).Value = allocation.IsActive ? "Yes" : "No";
             row++;
         }
         

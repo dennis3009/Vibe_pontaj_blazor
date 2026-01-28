@@ -1,0 +1,348 @@
+@page "/admin/allocations"
+@attribute [Authorize(Roles = "Admin")]
+@inject IProjectAllocationRepository AllocationRepository
+@inject IEmployeeRepository EmployeeRepository
+@inject IProjectRepository ProjectRepository
+@inject IExcelExportService ExcelExportService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Manage Project Allocations - VibePontaj</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-3">
+        <div class="col-md-12">
+            <h2>
+                <span class="bi bi-diagram-3-fill me-2"></span>
+                Manage Project Allocations
+            </h2>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @errorMessage
+            <button type="button" class="btn-close" @onclick="@(() => errorMessage = null)"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            @successMessage
+            <button type="button" class="btn-close" @onclick="@(() => successMessage = null)"></button>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="text-center my-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading allocations...</p>
+        </div>
+    }
+    else
+    {
+        <div class="row mb-3">
+            <div class="col-md-12">
+                <button class="btn btn-primary" @onclick="ShowAddModal">
+                    <span class="bi bi-plus-lg me-2"></span>Add New Allocation
+                </button>
+                <button class="btn btn-success ms-2" @onclick="ExportToExcel">
+                    <span class="bi bi-file-earmark-excel-fill me-2"></span>Export to Excel
+                </button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>ID</th>
+                                <th>Employee</th>
+                                <th>Project</th>
+                                <th>Project Code</th>
+                                <th>Start Date</th>
+                                <th>End Date</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (allocations == null || !allocations.Any())
+                            {
+                                <tr>
+                                    <td colspan="8" class="text-center text-muted">No allocations found</td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var allocation in allocations)
+                                {
+                                    <tr>
+                                        <td>@allocation.Id</td>
+                                        <td>@(allocation.Employee?.FullName ?? "N/A")</td>
+                                        <td>@(allocation.Project?.Name ?? "N/A")</td>
+                                        <td><span class="badge bg-secondary">@(allocation.Project?.ProjectCode ?? "N/A")</span></td>
+                                        <td>@allocation.StartDate.ToString("MMM dd, yyyy")</td>
+                                        <td>@(allocation.EndDate?.ToString("MMM dd, yyyy") ?? "Ongoing")</td>
+                                        <td>
+                                            <span class="badge bg-@(allocation.IsActive ? "success" : "secondary")">
+                                                @(allocation.IsActive ? "Active" : "Inactive")
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-sm btn-warning" @onclick="() => ShowEditModal(allocation)">
+                                                <span class="bi bi-pencil-fill"></span>
+                                            </button>
+                                            @if (allocation.IsActive)
+                                            {
+                                                <button class="btn btn-sm btn-danger ms-1" @onclick="() => DeactivateAllocation(allocation)">
+                                                    <span class="bi bi-x-circle-fill"></span>
+                                                </button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@* Add/Edit Modal *@
+@if (showModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        @(isEditMode ? "Edit Project Allocation" : "Add New Project Allocation")
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Employee <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="currentAllocation.EmployeeId" disabled="@isEditMode">
+                                <option value="0">Select Employee</option>
+                                @foreach (var emp in employees)
+                                {
+                                    <option value="@emp.Id">@emp.FullName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Project <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="currentAllocation.ProjectId" disabled="@isEditMode">
+                                <option value="0">Select Project</option>
+                                @foreach (var proj in projects)
+                                {
+                                    <option value="@proj.Id">@proj.Name (@proj.ProjectCode)</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Start Date <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" @bind="currentAllocation.StartDate" />
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">End Date</label>
+                            <input type="date" class="form-control" @bind="endDateInput" />
+                        </div>
+                    </div>
+                    @if (isEditMode)
+                    {
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" @bind="currentAllocation.IsActive" id="isActive" />
+                                    <label class="form-check-label" for="isActive">
+                                        Active
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                    @if (!isEditMode)
+                    {
+                        <div class="alert alert-info">
+                            <small>
+                                <i class="bi bi-info-circle me-2"></i>
+                                <strong>Note:</strong> Employee and Project cannot be changed after allocation is created. 
+                                You can set an end date to close an allocation or deactivate it.
+                            </small>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveAllocation">
+                        <span class="bi bi-save me-2"></span>Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ProjectAllocation> allocations = new();
+    private List<Employee> employees = new();
+    private List<Project> projects = new();
+    private ProjectAllocation currentAllocation = new();
+    private DateTime? endDateInput;
+    private bool isLoading = true;
+    private bool showModal = false;
+    private bool isEditMode = false;
+    private string? errorMessage;
+    private string? successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        try
+        {
+            isLoading = true;
+            var allocationsTask = AllocationRepository.GetAllAsync();
+            var employeesTask = EmployeeRepository.GetAllAsync();
+            var projectsTask = ProjectRepository.GetAllAsync();
+            
+            await Task.WhenAll(allocationsTask, employeesTask, projectsTask);
+            
+            allocations = allocationsTask.Result.ToList();
+            employees = employeesTask.Result.ToList();
+            projects = projectsTask.Result.ToList();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading data: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void ShowAddModal()
+    {
+        currentAllocation = new ProjectAllocation
+        {
+            StartDate = DateTime.Today,
+            IsActive = true
+        };
+        endDateInput = null;
+        isEditMode = false;
+        showModal = true;
+        errorMessage = null;
+    }
+
+    private void ShowEditModal(ProjectAllocation allocation)
+    {
+        currentAllocation = new ProjectAllocation
+        {
+            Id = allocation.Id,
+            EmployeeId = allocation.EmployeeId,
+            ProjectId = allocation.ProjectId,
+            StartDate = allocation.StartDate,
+            EndDate = allocation.EndDate,
+            IsActive = allocation.IsActive
+        };
+        endDateInput = allocation.EndDate;
+        isEditMode = true;
+        showModal = true;
+        errorMessage = null;
+    }
+
+    private void CloseModal()
+    {
+        showModal = false;
+        currentAllocation = new();
+        endDateInput = null;
+    }
+
+    private async Task SaveAllocation()
+    {
+        try
+        {
+            if (currentAllocation.EmployeeId == 0 || currentAllocation.ProjectId == 0)
+            {
+                errorMessage = "Please select both employee and project.";
+                return;
+            }
+
+            currentAllocation.EndDate = endDateInput;
+
+            if (isEditMode)
+            {
+                await AllocationRepository.UpdateAsync(currentAllocation);
+                successMessage = "Allocation updated successfully.";
+            }
+            else
+            {
+                currentAllocation.CreatedAt = DateTime.UtcNow;
+                await AllocationRepository.CreateAsync(currentAllocation);
+                successMessage = "Allocation created successfully.";
+            }
+
+            CloseModal();
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error saving allocation: {ex.Message}";
+        }
+    }
+
+    private async Task DeactivateAllocation(ProjectAllocation allocation)
+    {
+        try
+        {
+            var employeeName = allocation.Employee?.FullName ?? "Employee";
+            var projectName = allocation.Project?.Name ?? "Project";
+            bool confirmed = await JSRuntime.InvokeAsync<bool>("confirm", 
+                $"Are you sure you want to deactivate the allocation of {employeeName} to {projectName}?");
+            
+            if (confirmed)
+            {
+                await AllocationRepository.DeleteAsync(allocation.Id);
+                successMessage = "Allocation deactivated successfully.";
+                await LoadData();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error deactivating allocation: {ex.Message}";
+        }
+    }
+
+    private async Task ExportToExcel()
+    {
+        try
+        {
+            var data = ExcelExportService.ExportProjectAllocations(allocations);
+            var fileName = $"ProjectAllocations_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(data));
+            successMessage = "Allocations exported successfully.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error exporting to Excel: {ex.Message}";
+        }
+    }
+}

@@ -1,0 +1,351 @@
+@page "/admin/contracts"
+@attribute [Authorize(Roles = "Admin")]
+@inject IContractRepository ContractRepository
+@inject IEmployeeRepository EmployeeRepository
+@inject IExcelExportService ExcelExportService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Manage Contracts - VibePontaj</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-3">
+        <div class="col-md-12">
+            <h2>
+                <span class="bi bi-file-earmark-text-fill me-2"></span>
+                Manage Contracts
+            </h2>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @errorMessage
+            <button type="button" class="btn-close" @onclick="@(() => errorMessage = null)"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            @successMessage
+            <button type="button" class="btn-close" @onclick="@(() => successMessage = null)"></button>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="text-center my-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading contracts...</p>
+        </div>
+    }
+    else
+    {
+        <div class="row mb-3">
+            <div class="col-md-12">
+                <button class="btn btn-primary" @onclick="ShowAddModal">
+                    <span class="bi bi-plus-lg me-2"></span>Add New Contract
+                </button>
+                <button class="btn btn-success ms-2" @onclick="ExportToExcel">
+                    <span class="bi bi-file-earmark-excel-fill me-2"></span>Export to Excel
+                </button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>ID</th>
+                                <th>Employee</th>
+                                <th>Contract Type</th>
+                                <th>Start Date</th>
+                                <th>End Date</th>
+                                <th>Hourly Rate</th>
+                                <th>Working Hours/Day</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (contracts == null || !contracts.Any())
+                            {
+                                <tr>
+                                    <td colspan="9" class="text-center text-muted">No contracts found</td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var contract in contracts)
+                                {
+                                    <tr>
+                                        <td>@contract.Id</td>
+                                        <td>@(contract.Employee?.FullName ?? "N/A")</td>
+                                        <td><span class="badge bg-info">@contract.ContractType</span></td>
+                                        <td>@contract.StartDate.ToString("MMM dd, yyyy")</td>
+                                        <td>@(contract.EndDate?.ToString("MMM dd, yyyy") ?? "Ongoing")</td>
+                                        <td>$@contract.HourlyRate.ToString("F2")</td>
+                                        <td>@contract.WorkingHoursPerDay</td>
+                                        <td>
+                                            <span class="badge bg-@(contract.IsActive ? "success" : "secondary")">
+                                                @(contract.IsActive ? "Active" : "Inactive")
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-sm btn-warning" @onclick="() => ShowEditModal(contract)">
+                                                <span class="bi bi-pencil-fill"></span>
+                                            </button>
+                                            @if (contract.IsActive)
+                                            {
+                                                <button class="btn btn-sm btn-danger ms-1" @onclick="() => DeactivateContract(contract)">
+                                                    <span class="bi bi-x-circle-fill"></span>
+                                                </button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@* Add/Edit Modal *@
+@if (showModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        @(isEditMode ? "Edit Contract" : "Add New Contract")
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Employee <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="currentContract.EmployeeId" disabled="@isEditMode">
+                                <option value="0">Select Employee</option>
+                                @foreach (var emp in employees)
+                                {
+                                    <option value="@emp.Id">@emp.FullName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Contract Type <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="currentContract.ContractType">
+                                <option value="">Select Type</option>
+                                <option value="Full-time">Full-time</option>
+                                <option value="Part-time">Part-time</option>
+                                <option value="Contract">Contract</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Start Date <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" @bind="currentContract.StartDate" />
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">End Date</label>
+                            <input type="date" class="form-control" @bind="endDateInput" />
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Hourly Rate ($) <span class="text-danger">*</span></label>
+                            <input type="number" step="0.01" min="0" class="form-control" @bind="currentContract.HourlyRate" />
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Working Hours Per Day <span class="text-danger">*</span></label>
+                            <input type="number" min="1" max="24" class="form-control" @bind="currentContract.WorkingHoursPerDay" />
+                        </div>
+                    </div>
+                    @if (isEditMode)
+                    {
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" @bind="currentContract.IsActive" id="isActive" />
+                                    <label class="form-check-label" for="isActive">
+                                        Active
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveContract">
+                        <span class="bi bi-save me-2"></span>Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Contract> contracts = new();
+    private List<Employee> employees = new();
+    private Contract currentContract = new();
+    private DateTime? endDateInput;
+    private bool isLoading = true;
+    private bool showModal = false;
+    private bool isEditMode = false;
+    private string? errorMessage;
+    private string? successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        try
+        {
+            isLoading = true;
+            var contractsTask = ContractRepository.GetAllAsync();
+            var employeesTask = EmployeeRepository.GetAllAsync();
+            
+            await Task.WhenAll(contractsTask, employeesTask);
+            
+            contracts = contractsTask.Result.ToList();
+            employees = employeesTask.Result.ToList();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading data: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void ShowAddModal()
+    {
+        currentContract = new Contract
+        {
+            StartDate = DateTime.Today,
+            WorkingHoursPerDay = 8,
+            IsActive = true
+        };
+        endDateInput = null;
+        isEditMode = false;
+        showModal = true;
+        errorMessage = null;
+    }
+
+    private void ShowEditModal(Contract contract)
+    {
+        currentContract = new Contract
+        {
+            Id = contract.Id,
+            EmployeeId = contract.EmployeeId,
+            ContractType = contract.ContractType,
+            StartDate = contract.StartDate,
+            EndDate = contract.EndDate,
+            HourlyRate = contract.HourlyRate,
+            WorkingHoursPerDay = contract.WorkingHoursPerDay,
+            IsActive = contract.IsActive
+        };
+        endDateInput = contract.EndDate;
+        isEditMode = true;
+        showModal = true;
+        errorMessage = null;
+    }
+
+    private void CloseModal()
+    {
+        showModal = false;
+        currentContract = new();
+        endDateInput = null;
+    }
+
+    private async Task SaveContract()
+    {
+        try
+        {
+            if (currentContract.EmployeeId == 0 ||
+                string.IsNullOrWhiteSpace(currentContract.ContractType) ||
+                currentContract.HourlyRate <= 0 ||
+                currentContract.WorkingHoursPerDay <= 0)
+            {
+                errorMessage = "Please fill in all required fields with valid values.";
+                return;
+            }
+
+            currentContract.EndDate = endDateInput;
+
+            if (isEditMode)
+            {
+                currentContract.UpdatedAt = DateTime.UtcNow;
+                await ContractRepository.UpdateAsync(currentContract);
+                successMessage = "Contract updated successfully.";
+            }
+            else
+            {
+                currentContract.CreatedAt = DateTime.UtcNow;
+                await ContractRepository.CreateAsync(currentContract);
+                successMessage = "Contract created successfully.";
+            }
+
+            CloseModal();
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error saving contract: {ex.Message}";
+        }
+    }
+
+    private async Task DeactivateContract(Contract contract)
+    {
+        try
+        {
+            var employeeName = contract.Employee?.FullName ?? "this contract";
+            bool confirmed = await JSRuntime.InvokeAsync<bool>("confirm", 
+                $"Are you sure you want to deactivate the contract for {employeeName}?");
+            
+            if (confirmed)
+            {
+                await ContractRepository.DeleteAsync(contract.Id);
+                successMessage = $"Contract deactivated successfully.";
+                await LoadData();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error deactivating contract: {ex.Message}";
+        }
+    }
+
+    private async Task ExportToExcel()
+    {
+        try
+        {
+            var data = ExcelExportService.ExportContracts(contracts);
+            var fileName = $"Contracts_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(data));
+            successMessage = "Contracts exported successfully.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error exporting to Excel: {ex.Message}";
+        }
+    }
+}
