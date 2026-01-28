@@ -98,15 +98,18 @@
             else
             {
                 errorMessage = "Invalid email or password.";
-                isLoading = false;
                 StateHasChanged(); // Force UI update to show error
             }
         }
         catch (Exception ex)
         {
             errorMessage = $"An error occurred: {ex.Message}";
-            isLoading = false;
             StateHasChanged(); // Force UI update to show error
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged(); // Ensure UI updates with final state
         }
     }
 
